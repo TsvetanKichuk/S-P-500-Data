@@ -1,0 +1,4 @@
+Configuration,"Loading time, (sec)","Writing time to DB, (sec)","Total time, (sec)"
+daily_2_years,562.06,0,562.06
+hourly_20_days,562.06,0,562.06
+five_min_2_days,562.06,0,562.06

@@ -1,11 +1,17 @@
 import os
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import requests
 import yfinance as yf
 from bs4 import BeautifulSoup
 
+from database_conf import DatabaseHandler
+from performance import PerformanceMetrics
 
+metrics = PerformanceMetrics()
+
+@metrics.time_it('download')
 def get_sp500_tickers():
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     try:
@@ -43,6 +49,7 @@ def get_sp500_tickers():
         return []
 
 
+@metrics.time_it('database')
 def download_sp500_historical_data(
         tickers,
         period_config: dict
@@ -78,11 +85,11 @@ def download_sp500_historical_data(
 
                 if not data.empty:
                     current_config_data[ticker] = data[['Open', 'High', 'Low', 'Close', 'Volume',]]
-                    print(f"  Data for {ticker} ({interval}) loaded successfully ({len(data)}).")
+                    print(f"  Data for ticker: {ticker}, interval ({interval}) loaded successfully ({len(data)}).")
                 else:
                     print(f" There is no data for {ticker} ({interval}) for the period.")
             except Exception as e:
-                print(f"  Error  in data download {ticker} ({interval}): {e}")
+                print(f"  Error in data download {ticker} ({interval}): {e}")
 
         all_downloaded_data[config_name] = current_config_data
 
@@ -96,7 +103,6 @@ if __name__ == "__main__":
         print("Could not delete the list of S&P 500 tickers. The program ends.")
     else:
         print(f"Get {len(sp500_tickers)} tickers S&P 500.")
-
 
         data_configurations = {
             "daily_2_years": {
@@ -117,28 +123,21 @@ if __name__ == "__main__":
 
         if all_sp500_data:
             print("\n--- DATA DOWNLOAD COMPLETE! ---")
-            for config_name, config_data in all_sp500_data.items():
-                print(f"\nConfiguration: '{config_name}'")
-                downloaded_count = len([t for t, df in config_data.items() if not df.empty])
-                print(f"Number of tickers with data: {downloaded_count} with {len(sp500_tickers)}")
 
-                if 'S&P500' in config_data and not config_data['S&P500'].empty:
-                    print(f"Data example S&P500 ({config_name}):")
-                    print(config_data['S&P500'].head())
-                    print(f"  Number of records S&P500: {len(config_data['S&P500'])}")
-                else:
-                    print(f" Data for S&P500 ({config_name}) not found.")
+            db_config = {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': os.environ.get('POSTGRES_DB'),
+                'USER': os.environ.get('POSTGRES_USER'),
+                'PASSWORD': os.environ.get('POSTGRES_PASSWORD'),
+                'HOST': os.environ.get('POSTGRES_HOST'),
+                'PORT': 5432,
+            }
 
-            base_output_dir = "sp500_historical_multi_timeframe_data"
-            for config_name, config_data in all_sp500_data.items():
-                config_output_dir = os.path.join(base_output_dir, config_name)
-                os.makedirs(config_output_dir, exist_ok=True)
-                for ticker, df in config_data.items():
-                    if not df.empty:
-                             file_path = os.path.join(config_output_dir, f"{ticker}.csv")
-                             df.to_csv(file_path)
-                             print(f"Data for {ticker} ({config_name}) saved at {file_path}")
-                print(f"\n All data were saved at: {base_output_dir}")
+            db_handler = DatabaseHandler(db_config)
+            db_handler.save_stock_data(all_sp500_data)
+            save_method = metrics.time_it('database')(db_handler.save_stock_data)
+            save_method(all_sp500_data)
 
-        else:
-            print("Couldn't get data for S&P 500.")
+            print("\nPerformance report:")
+            print(metrics.get_summary().to_string())
+            metrics.save_report()
